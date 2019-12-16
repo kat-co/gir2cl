@@ -1,0 +1,54 @@
+#+AUTHOR: Katherine Cox-Buday <cox.katherine.e@gmail.com>
+
+* About
+
+This is a library for generating a Common-Lisp foreign function interface (FFI) from [[https://gi.readthedocs.io/en/latest/][GObject Introspection]] XML files (GIR files).
+
+Please note that this does not generate the actual FFI, rather it generates bindings in terms of the wonderful [[https://github.com/andy128k/cl-gobject-introspection][cl-gobject-introspection]] project. The Common Lisp wrapper types which are generated are useful for working with a GIR library's object hierarchy in a way which is more natural to Common Lisp.
+
+There are also some caveats:
+
+1. The code has only been tested on Linux with SBCL. It is intended to be tested with other Lisp implementations.
+2. The generated code has not been tested very broadly, nor deeply.
+3. There are not very many unit tests written yet.
+4. Only classes and methods are currently supported.
+
+* Installation
+
+I plan to get this into quicklisp. For now, please clone the directory, make ASDF aware of its location, and run =(asdf:load-system :gir2cl)=. =libgobject= must be on your =CFFI= path.
+
+* How to Work with the Sourcecode
+
+From a REPL run:
+
+#+BEGIN_SRC common-lisp
+  (asdf:operate :test-op :gir2cl)
+#+END_SRC
+
+* How to Generate Code
+
+This library is intended to be used through a REPL.
+
+#+BEGIN_SRC common-lisp
+  (with-open-file (stream #P"./gtk.lisp" :direction :output :if-exists :supersede)
+    (gir2cl:generate "#:gtk-low-level" "Gtk" stream "/usr/share/gir-1.0/Gtk-3.0.gir"))
+#+END_SRC
+
+* How to Utilize the Generated Code
+
+~gir2cl~ pretty closely follows the GIR declarations and generates classes, methods, and functions which make the classes and take in the appropriate arguments to do so. All classes inherit from a base-class, =gir-object=.
+
+Utilizing the methods is a little cumbersome at the moment as it expects GIR types, and not the Common Lisp types which have been generated. For that reason, you will probably be doing a lot of this:
+
+#+BEGIN_SRC common-lisp
+  (let ((my-obj (my-gir-lib:make-my-object)))
+    (my-gir-lib:do-the-thing (my-gir-lib:native-pointer my-obj)))
+#+END_SRC
+
+I would like to make this less cumbersome in the future.
+
+* FAQ
+
+** Is the generated source code also covered by the LGPL v3?
+
+No. You are free to license the generated code as you see fit.
