@@ -172,17 +172,18 @@ passed in. Returns a list of exported symbols."
                   :initarg :output-stream
                   :initform (error "output-stream must be specified."))
    (current-class :type gir-class
+                  :initform nil
                   :accessor current-class)
    (current-constructor :type gir-class
+                        :initform nil
                         :accessor current-constructor)
    (current-method :type gir-method
+                   :initform nil
                    :accessor current-method)
    (current-parameter :type gir-parameter
                       :initform nil
                       :accessor current-parameter)
-   (within-interface-element :type boolean
-                             :initform nil
-                             :accessor within-interface-element)
+
    (all-symbols :type list
                 :initform (list)
                 :accessor all-symbols
@@ -190,17 +191,14 @@ passed in. Returns a list of exported symbols."
                 "A list of all symbols that are generated.")))
 
 (defmethod sax:start-element ((handler gir-handler) namespace-uri local-name qname attributes)
-
+  ;; All of the logic for skipping XML nodes of certain types should
+  ;; be centralized here. By doing this, the logic in `end-element`
+  ;; only need check to see if an instance of instantiated.
   (flet ((element-attr (attr-name)
            (sax:attribute-value
             (find attr-name attributes :key #'sax:attribute-local-name :test #'string=))))
 
     (cond
-      ((string= local-name "interface")
-       ;; We don't do anything with interfaces, but we must denote
-       ;; their traversal to avoid populating invalid constructs.
-       (setf (within-interface-element handler) t))
-
       ((string= local-name "class")
        (let* ((name (element-attr "name"))
               (parent (element-attr "parent"))
@@ -215,7 +213,10 @@ passed in. Returns a list of exported symbols."
          (setf (gethash name (clos-from-gir handler)) acceptable-name)
          (setf (current-class handler) class)))
 
-      ((string= local-name "constructor")
+      ((and (string= local-name "constructor")
+            ;; Only constructors within classes are currently
+            ;; supported.
+            (current-class handler))
        (let* ((name (element-attr "name"))
               (constructor (make-instance 'gir-function
                                           :name (kebab-symbol-from-string name)
@@ -226,7 +227,8 @@ passed in. Returns a list of exported symbols."
          (setf (current-constructor handler) constructor)))
 
       ((and (string= local-name "method")
-            (not (within-interface-element handler)))
+            ;; Only methods within classes are currently supported.
+            (current-class handler))
        (let* ((name (element-attr "name"))
               (class-namespaced-name (format nil "~(~a-~a~)"
                                              (name (current-class handler))
@@ -243,8 +245,13 @@ passed in. Returns a list of exported symbols."
 
          (setf (current-method handler) method)))
 
-      ((and (find local-name (list "parameter" #|"instance-parameter"|#) :test #'string=)
-            (not (within-interface-element handler)))
+      ((and (string= local-name "parameter")
+            (or (current-method handler)
+                (current-constructor handler))
+            ;; The cl-gobject-introspection library handles passing the
+            ;; length of sequences for us. Don't include the parameter
+            ;; in our bindings.
+            (not (length-parameter-p handler)))
        (let* ((name (element-attr "name"))
               (parameter (make-instance 'gir-parameter :name (kebab-symbol-from-string name))))
 
@@ -257,10 +264,11 @@ passed in. Returns a list of exported symbols."
        (setf (gir-type (current-parameter handler)) 'array)))))
 
 (defmethod sax:end-element ((handler gir-handler) namespace-uri local-name qname)
+  ;; Before processing a element when exiting its XML node, first
+  ;; check that the handler has instantiated an instance for the
+  ;; elment. There are conditionals which may cause the handler to
+  ;; bypass certain elements.
   (cond
-    ((string= local-name "interface")
-     (setf (within-interface-element handler) nil))
-
     ((string= local-name "class")
      ;; Write out the current class and its methods
 
@@ -279,7 +287,8 @@ passed in. Returns a list of exported symbols."
        ;; Clear out the current class
        (setf current-class nil)))
 
-    ((string= local-name "constructor")
+    ((and (string= local-name "constructor")
+          (current-constructor handler))
      ;; Add the current constructor to the current class
      (with-slots (current-class current-constructor all-symbols)
          handler
@@ -290,7 +299,7 @@ passed in. Returns a list of exported symbols."
        (setf current-constructor nil)))
 
     ((and (string= local-name "method")
-          (not (within-interface-element handler)))
+          (current-method handler))
      ;; Add the current method to the current class
      (with-slots (current-class current-method all-symbols)
          handler
@@ -298,27 +307,25 @@ passed in. Returns a list of exported symbols."
        (setf all-symbols (cons (name current-method) all-symbols))
        (setf current-method nil)))
 
-    ((and (find local-name (list "parameter" #|"instance-parameter"|#) :test #'string=)
-          (not (within-interface-element handler))
-          ;; The cl-gobject-introspection library handles passing the
-          ;; length of sequences for us. Don't include the parameter
-          ;; in our bindings.
-          ;; TODO(katco): How does the gir lib check this, and can we use that here?
-          (let* ((current-obj (or (and (slot-boundp handler 'current-method) (current-method handler))
-                                  (current-constructor handler)))
-                 (last-param (when current-obj (car (parameters current-obj)))))
-            (if last-param
-                (not (eq (gir-type last-param) 'array))
-                t)))
-
-     ;; Add parameter to current method
+    ((and (string= local-name "parameter")
+          (current-parameter handler))
+     ;; Add parameter to current method or constructor
      (with-slots (current-method current-constructor current-parameter)
          handler
-
-       (if (and (slot-boundp handler 'current-method) current-method)
+       (if current-method
            (pushnew current-parameter (parameters current-method))
            (pushnew current-parameter (parameters current-constructor)))
        (setf current-parameter nil)))))
+
+(defun length-parameter-p (handler)
+  "Determines whether this parameter is meant to contain the length of
+the previous parameter."
+  ;; TODO(katco): How does the gir lib check this, and can we use that here?
+  (let* ((current-obj (or (current-method handler) (current-constructor handler)))
+         (last-param (when current-obj (car (parameters current-obj)))))
+    (if last-param
+        (eq (gir-type last-param) 'array)
+        nil)))
 
 (defun kebab-symbol-from-string (s)
   (check-type s string)
