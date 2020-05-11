@@ -1,5 +1,5 @@
 (defsystem "gir2cl"
-  :version "0.1.1"
+  :version "0.1.2"
   :author "Katherine Cox-Buday <cox.katherine.e@gmail.com>"
   :license "GPLv3"
   :depends-on (#:cxml

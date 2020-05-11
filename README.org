@@ -22,7 +22,7 @@ I plan to get this into quicklisp. For now, please clone the directory, make ASD
 From a REPL run:
 
 #+BEGIN_SRC common-lisp
-  (asdf:operate :test-op :gir2cl)
+  (asdf:test-system :gir2cl)
 #+END_SRC
 
 * How to Generate Code
